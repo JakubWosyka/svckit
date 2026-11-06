@@ -5,7 +5,86 @@ import (
 	"compress/gzip"
 	"io/ioutil"
 	"sync"
+
+	"github.com/klauspost/compress/zstd"
 )
+
+// Encoding is the name of a compression algorithm as used in the "encoding"
+// header of a backend message.
+type Encoding string
+
+const (
+	EncodingNone Encoding = ""
+	EncodingGzip Encoding = "gzip"
+	EncodingZstd Encoding = "zstd"
+)
+
+// zstdEncoder and zstdDecoder are shared: EncodeAll and DecodeAll are safe for
+// concurrent use.
+var (
+	zstdEncoder = mustNewZstdEncoder()
+	zstdDecoder = mustNewZstdDecoder()
+)
+
+func mustNewZstdEncoder() *zstd.Encoder {
+	e, err := zstd.NewWriter(nil)
+	if err != nil {
+		panic(err)
+	}
+	return e
+}
+
+func mustNewZstdDecoder() *zstd.Decoder {
+	d, err := zstd.NewReader(nil)
+	if err != nil {
+		panic(err)
+	}
+	return d
+}
+
+// Zstd compresses data with zstandard.
+func Zstd(data []byte) []byte {
+	return zstdEncoder.EncodeAll(data, nil)
+}
+
+// Unzstd decompresses zstandard data.
+func Unzstd(data []byte) ([]byte, error) {
+	return zstdDecoder.DecodeAll(data, nil)
+}
+
+// IsZstd reports whether buf starts with the zstandard frame magic.
+func IsZstd(buf []byte) bool {
+	return len(buf) >= 4 &&
+		buf[0] == 0x28 && buf[1] == 0xB5 && buf[2] == 0x2F && buf[3] == 0xFD
+}
+
+// Detect returns the encoding of buf, recognised by its magic bytes, or
+// EncodingNone.
+func Detect(buf []byte) Encoding {
+	switch {
+	case IsGziped(buf):
+		return EncodingGzip
+	case IsZstd(buf):
+		return EncodingZstd
+	}
+	return EncodingNone
+}
+
+// DecompressIf decompresses data when it is gzip or zstd encoded and returns
+// it unchanged otherwise. It is GunzipIf extended to zstd, and keeps its error
+// behaviour: on a corrupt body the error is returned with whatever the
+// decoder produced.
+func DecompressIf(data []byte) ([]byte, Encoding, error) {
+	switch enc := Detect(data); enc {
+	case EncodingGzip:
+		out, err := Gunzip(data)
+		return out, enc, err
+	case EncodingZstd:
+		out, err := Unzstd(data)
+		return out, enc, err
+	}
+	return data, EncodingNone, nil
+}
 
 //Gzip - compess input
 func Gzip(data []byte) []byte {
