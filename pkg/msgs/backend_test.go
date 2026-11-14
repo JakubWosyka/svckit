@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/minus5/svckit/pkg/compress"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -61,6 +62,25 @@ func TestMsgGzip(t *testing.T) {
 	assert.Equal(t, "iso medo u ducan", msg.bodyStr())
 }
 
+func TestMsgZstd(t *testing.T) {
+	body := `{"iso":"medo u ducan"}`
+	buf := append([]byte(`{"type":"pero","no":7,"encoding":"zstd"}`), HeaderSeparator...)
+	buf = append(buf, compress.Zstd([]byte(body))...)
+
+	msg := parseAsBackend(buf)
+	assert.Equal(t, "pero", msg.Type)
+	assert.Equal(t, 7, msg.No)
+	assert.Equal(t, "zstd", msg.Encoding)
+	assert.Equal(t, body, msg.bodyStr())
+	assert.True(t, compress.IsZstd(msg.RawBody))
+}
+
+func TestMsgZstdWithoutHeader(t *testing.T) {
+	body := `{"iso":"medo u ducan"}`
+	msg := parseAsBackend(compress.Zstd([]byte(body)))
+	assert.Equal(t, body, msg.bodyStr())
+}
+
 func TestMsgLiveDogadjaj(t *testing.T) {
 	content, err := ioutil.ReadFile("./fixtures/live_dogadjaj_web2_6430239_full")
 	assert.Nil(t, err)
@@ -87,7 +107,7 @@ func TestIsFullIsDiff(t *testing.T) {
 }
 
 func TestCreateBackend(t *testing.T) {
-	buf := createBackend("pero", 12, 14, nil, true)
+	buf := createBackend("pero", 12, 14, nil, compress.EncodingGzip)
 	assert.NotNil(t, buf)
 
 	buf = CreateBackendNoGzip("pero", 12, nil)

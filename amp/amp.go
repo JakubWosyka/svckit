@@ -147,7 +147,7 @@ func parse(buf []byte, serializer jsoniter.API) *Msg {
 
 	if len(parts) > 1 {
 		m.body = parts[1]
-		body, err := compress.GunzipIf(m.body)
+		body, _, err := compress.DecompressIf(m.body)
 		if err != nil {
 			log.Error(err)
 			return nil

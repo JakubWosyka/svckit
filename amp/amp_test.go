@@ -3,6 +3,7 @@ package amp
 import (
 	"testing"
 
+	"github.com/minus5/svckit/pkg/compress"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -106,6 +107,18 @@ func TestParseFromBackend(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := ParseFromBackend(tt.in)
 			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestParseFromBackendCompressed(t *testing.T) {
+	body := []byte(`{"iso":"medo u ducan"}`)
+	for name, enc := range map[string]func([]byte) []byte{"gzip": compress.Gzip, "zstd": compress.Zstd} {
+		t.Run(name, func(t *testing.T) {
+			buf := append([]byte(`{"t":2,"u":"some.topic/method"}`+"\n"), enc(body)...)
+			m := ParseFromBackend(buf)
+			require.NotNil(t, m)
+			assert.Equal(t, body, m.Body())
 		})
 	}
 }

@@ -5,7 +5,63 @@ import (
 	"compress/gzip"
 	"io/ioutil"
 	"sync"
+
+	"github.com/klauspost/compress/zstd"
 )
+
+// Encoding - value of the "encoding" message header
+type Encoding string
+
+const (
+	EncodingNone Encoding = ""
+	EncodingGzip Encoding = "gzip"
+	EncodingZstd Encoding = "zstd"
+)
+
+var (
+	zstdEncoder, _ = zstd.NewWriter(nil)
+	zstdDecoder, _ = zstd.NewReader(nil)
+)
+
+// Zstd - compress input
+func Zstd(data []byte) []byte {
+	return zstdEncoder.EncodeAll(data, nil)
+}
+
+// Unzstd - decompress data
+func Unzstd(data []byte) ([]byte, error) {
+	return zstdDecoder.DecodeAll(data, nil)
+}
+
+// IsZstd - checks zstd magic bytes
+func IsZstd(buf []byte) bool {
+	return len(buf) >= 4 &&
+		buf[0] == 0x28 && buf[1] == 0xB5 && buf[2] == 0x2F && buf[3] == 0xFD
+}
+
+// Detect - encoding of buf by its magic bytes
+func Detect(buf []byte) Encoding {
+	switch {
+	case IsGziped(buf):
+		return EncodingGzip
+	case IsZstd(buf):
+		return EncodingZstd
+	}
+	return EncodingNone
+}
+
+// DecompressIf - like GunzipIf, for gzip and zstd
+func DecompressIf(data []byte) ([]byte, Encoding, error) {
+	switch enc := Detect(data); enc {
+	case EncodingGzip:
+		out, err := Gunzip(data)
+		return out, enc, err
+	case EncodingZstd:
+		out, err := Unzstd(data)
+		return out, enc, err
+	}
+	return data, EncodingNone, nil
+}
 
 //Gzip - compess input
 func Gzip(data []byte) []byte {

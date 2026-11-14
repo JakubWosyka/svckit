@@ -139,14 +139,18 @@ func CreateBackendDel(typ string) []byte {
 }
 
 func CreateBackend(typ string, no int, body []byte) []byte {
-	return createBackend(typ, no, 0, body, true)
+	return createBackend(typ, no, 0, body, compress.EncodingGzip)
 }
 
 func CreateBackendNoGzip(typ string, no int, body []byte) []byte {
-	return createBackend(typ, no, 0, body, false)
+	return createBackend(typ, no, 0, body, compress.EncodingNone)
 }
 
-func createBackend(typ string, no int, ts int, body []byte, shouldCompress bool) []byte {
+func CreateBackendEncoded(typ string, no int, body []byte, encoding compress.Encoding) []byte {
+	return createBackend(typ, no, 0, body, encoding)
+}
+
+func createBackend(typ string, no int, ts int, body []byte, encoding compress.Encoding) []byte {
 	header := map[string]interface{}{
 		"type": typ,
 	}
@@ -158,14 +162,27 @@ func createBackend(typ string, no int, ts int, body []byte, shouldCompress bool)
 	} else {
 		header["ts"] = time.Now().UnixNano()
 	}
-	if shouldCompress && len(body) > GzipMsgSizeLimit {
-		body = compress.Gzip(body)
-		header["encoding"] = "gzip"
-	}
+	body = applyEncoding(header, body, encoding)
 	buf, _ := json.Marshal(header)
 	buf = append(buf, HeaderSeparator...)
 	buf = append(buf, body...)
 	return buf
+}
+
+func applyEncoding(header map[string]interface{}, body []byte, encoding compress.Encoding) []byte {
+	if len(body) <= GzipMsgSizeLimit {
+		return body
+	}
+	switch encoding {
+	case compress.EncodingGzip:
+		body = compress.Gzip(body)
+	case compress.EncodingZstd:
+		body = compress.Zstd(body)
+	default:
+		return body
+	}
+	header["encoding"] = string(encoding)
+	return body
 }
 
 func Header(key string, value interface{}) func(map[string]interface{}) {
@@ -174,11 +191,15 @@ func Header(key string, value interface{}) func(map[string]interface{}) {
 	}
 }
 
-var gzipKey = "__gzipKey__"
+var encodingKey = "__encodingKey__"
 
 func NoGzip() func(map[string]interface{}) {
+	return WithEncoding(compress.EncodingNone)
+}
+
+func WithEncoding(encoding compress.Encoding) func(map[string]interface{}) {
 	return func(h map[string]interface{}) {
-		h[gzipKey] = false
+		h[encodingKey] = encoding
 	}
 }
 
@@ -189,15 +210,12 @@ func BackendFactory(typ string, body []byte, opts ...func(map[string]interface{}
 	for _, o := range opts {
 		o(header)
 	}
-	shouldCompress := true
-	if v, ok := header[gzipKey]; ok {
-		shouldCompress = v.(bool)
-		delete(header, gzipKey)
+	encoding := compress.EncodingGzip
+	if v, ok := header[encodingKey]; ok {
+		encoding, _ = v.(compress.Encoding)
+		delete(header, encodingKey)
 	}
-	if shouldCompress && len(body) > GzipMsgSizeLimit {
-		body = compress.Gzip(body)
-		header["encoding"] = "gzip"
-	}
+	body = applyEncoding(header, body, encoding)
 	buf, _ := json.Marshal(header)
 	buf = append(buf, HeaderSeparator...)
 	buf = append(buf, body...)
@@ -205,7 +223,7 @@ func BackendFactory(typ string, body []byte, opts ...func(map[string]interface{}
 }
 
 func CreateBackendTs(typ string, no int, ts int, body []byte) []byte {
-	return createBackend(typ, no, ts, body, true)
+	return createBackend(typ, no, ts, body, compress.EncodingGzip)
 }
 
 func parseAsBackend(buf []byte) *Backend {
@@ -213,14 +231,14 @@ func parseAsBackend(buf []byte) *Backend {
 	rawHeader := parts[0]
 	msg, err := parseHeader(rawHeader)
 	if len(parts) == 1 || err != nil {
-		msg.Body, _ = compress.GunzipIf(buf)
+		msg.Body, _, _ = compress.DecompressIf(buf)
 		msg.RawBody = buf
 		msg.RawHeader = nil
 		return msg
 	}
 	body := parts[1]
 	msg.RawBody = body
-	msg.Body, _ = compress.GunzipIf(body)
+	msg.Body, _, _ = compress.DecompressIf(body)
 	msg.rawMsg = buf
 	return msg
 }
